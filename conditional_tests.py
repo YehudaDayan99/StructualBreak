@@ -22,16 +22,39 @@ def T_mu_statistic(x_grid: np.ndarray, X: np.ndarray, Y: np.ndarray, idx_split: 
     return T, overlap
 
 
-def T_sigma_statistic(x_grid: np.ndarray, X: np.ndarray, Y: np.ndarray, idx_split: int, h: float) -> Tuple[float, float]:
+# conditional_tests.py  
+
+def T_sigma_statistic(x_grid: np.ndarray, X: np.ndarray, Y: np.ndarray, idx_split: int, h: float):
+    # split segments
     X1, Y1 = X[:idx_split+1], Y[:idx_split+1]
     X2, Y2 = X[idx_split+1:], Y[idx_split+1:]
+
+    # jackknifed means per segment (already paper-consistent)
     mu1, _ = jackknife_mu(x_grid, X1, Y1, h)
     mu2, _ = jackknife_mu(x_grid, X2, Y2, h)
-    sig1 = np.sqrt(np.maximum(nw_variance(x_grid, X1, Y1, mu1, h), EPSILON))
-    sig2 = np.sqrt(np.maximum(nw_variance(x_grid, X2, Y2, mu2, h), EPSILON))
+
+    # jackknifed conditional variances: σ*² = 2·σ_h² − σ_{h/√2}²
+    sig2_1_h  = nw_variance(x_grid, X1, Y1, mu1, h)
+    sig2_1_h2 = nw_variance(x_grid, X1, Y1, mu1, h/np.sqrt(2))
+    sig2_1    = 2.0*sig2_1_h - sig2_1_h2
+
+    sig2_2_h  = nw_variance(x_grid, X2, Y2, mu2, h)
+    sig2_2_h2 = nw_variance(x_grid, X2, Y2, mu2, h/np.sqrt(2))
+    sig2_2    = 2.0*sig2_2_h - sig2_2_h2
+
+    # clip to avoid negatives from jackknife noise
+    sig2_1 = np.maximum(sig2_1, EPSILON)
+    sig2_2 = np.maximum(sig2_2, EPSILON)
+
+    # pooled density on full sample for standardization
     _, f_all = jackknife_mu(x_grid, X, Y, h)
-    logdiff = np.abs(np.log(sig1) - np.log(sig2))
-    T = float(np.max(np.sqrt(np.maximum(f_all, EPSILON)) * logdiff))
+
+    # paper-like scaling: sqrt(f / S_b) * |σ1*² − σ2*²| with S_b = σ1*² + σ2*²
+    Sb   = np.maximum(sig2_1 + sig2_2, EPSILON)
+    diff = np.abs(sig2_1 - sig2_2)
+    T    = float(np.max(np.sqrt(np.maximum(f_all, EPSILON) / Sb) * diff))
+
+    # same overlap diagnostic as your mean test
     overlap = float(np.mean(f_all > (OVERLAP_THRESHOLD / (len(X) * h))))
     return T, overlap
 
